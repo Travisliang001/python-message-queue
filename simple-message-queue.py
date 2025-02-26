@@ -1,39 +1,55 @@
 import queue
 import threading
 import time
+import requests
 
-# create（FIFO）queue
-msg_queue = queue.Queue()
+# Create a queue
+task_queue = queue.Queue()
 
-# producer thread
-def producer():
-    for i in range(5):
-        time.sleep(1)  
-        msg = f"message{i}"
-        msg_queue.put(msg)  # put message into queue
-        print(f"producer send：{msg}")
-
-# consumer thread
-def consumer():
+# HTTP request handler function
+def handle_request():
     while True:
-        msg = msg_queue.get()  # get message from queue
-        if msg is None:  # termination signal
+        url = task_queue.get()  # Get task from the queue
+        if url is None:  # Termination condition
             break
-        print(f"消费者处理：{msg}")
-        msg_queue.task_done()  # indicate that the message has been processed
-# create threads for producer and consumer
+        try:
+            response = requests.get(url)
+            print(f"Response status for {url}: {response.status_code}")
+        except Exception as e:
+            print(f"Request failed for {url}: {e}")
+        task_queue.task_done()  # Mark task as done
+
+# Producer: Add HTTP requests to the queue
+def producer():
+    urls = [
+        "https://jsonplaceholder.typicode.com/posts/1",
+        "https://jsonplaceholder.typicode.com/posts/2",
+        "https://jsonplaceholder.typicode.com/posts/3"
+    ]
+    
+    for url in urls:
+        print(f"Adding URL {url} to queue")
+        task_queue.put(url)
+        time.sleep(1)  # Simulate delay in task generation
+
+# Create multiple consumer threads
+consumer_threads = []
+for i in range(3):
+    t = threading.Thread(target=handle_request)
+    t.start()
+    consumer_threads.append(t)
+
+# Start producer thread
 producer_thread = threading.Thread(target=producer)
-consumer_thread = threading.Thread(target=consumer)
-
-# start producer and consumer threads
 producer_thread.start()
-consumer_thread.start()
 
-# wait for producer thread to finish
+# Wait for producer thread to finish
 producer_thread.join()
 
-# send termination signal to consumer thread
-msg_queue.put(None)
+# Send termination signal to consumer threads
+for _ in range(3):
+    task_queue.put(None)
 
-# waiting for consumer thread to finish
-consumer_thread.join()
+# Wait for consumer threads to finish
+for t in consumer_threads:
+    t.join()

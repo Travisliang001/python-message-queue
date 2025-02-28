@@ -1,0 +1,3 @@
+"""
+Worker module initialization.
+"""

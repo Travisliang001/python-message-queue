@@ -29,8 +29,6 @@ def start_workers(num_workers):
     """Start worker threads and health monitor."""
     global consumer_threads, thread_health
     
-    consumer_threads = []
-    
     for i in range(num_workers):
         t = threading.Thread(target=handle_request, 
                              args=(task_queue, thread_lock, thread_health))

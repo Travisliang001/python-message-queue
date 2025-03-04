@@ -1,0 +1,6 @@
+redis
+pika
+celery
+requests
+flask
+pytest

@@ -1,65 +1,99 @@
-"""
-Main Flask application entry point.
-"""
-import signal
+import logging
 import sys
-import atexit
-from flask import Flask
-from api import api_bp
-from worker.queue_manager import (
-    start_workers, start_producer, cleanup, 
-    thread_health, thread_lock
-)
-from config import (
-    DEFAULT_WORKER_COUNT, FLASK_HOST, FLASK_PORT, FLASK_DEBUG
-)
+import uuid
+from flask import Flask, jsonify
+import threading
+import time
 
-# Create Flask application
+# Flask app
 app = Flask(__name__)
+logger = logging.getLogger(__name__)
 
-# Register API blueprint
-app.register_blueprint(api_bp, url_prefix='/api')
+# Global variables to track tasks and threads
+tasks = {}  # Stores task details
+threads = []  # Stores active threads
+running = True  # Flag to control thread execution
 
-# Signal handlers
-def signal_handler(sig, frame):
-    print(f"Received signal {sig}, shutting down...")
-    cleanup()
-    sys.exit(0)
+def task_executor(task_id):
+    """Simulate a task execution."""
+    tasks[task_id] = {"status": "running", "progress": 0}
+    print(f"Task {task_id} started.")
 
-# Register signal handlers
-signal.signal(signal.SIGINT, signal_handler)
-signal.signal(signal.SIGTERM, signal_handler)
+    # Simulate task execution
+    for i in range(10):
+        if not running:
+            break
+        time.sleep(1)
+        tasks[task_id]["progress"] = (i + 1) * 10  # Update progress percentage
 
-# Register cleanup for various exit scenarios
-atexit.register(cleanup)
+    if running:
+        tasks[task_id]["status"] = "completed"
+        print(f"Task {task_id} finished.")
+    else:
+        tasks[task_id]["status"] = "stopped"
+        print(f"Task {task_id} stopped.")
 
-@app.route('/')
-def index():
-    """Simple root endpoint."""
-    return {
-        "status": "running",
-        "endpoints": [
-            "/api/add_task",
-            "/api/add_multiple",
-            "/api/queue_status",
-            "/api/thread_health",
-            "/api/start_producer",
-            "/api/stop_producer",
-            "/api/restart"
-        ]
-    }
+def thread_creator():
+    """Creates new threads periodically to execute tasks."""
+    while running:
+        for i in range(5):
+            if not running:
+                break
+            task_id = str(uuid.uuid4())
+            thread = threading.Thread(target=task_executor, args=(task_id,))
+            thread.start()
+            threads.append(thread)
 
-if __name__ == '__main__':
-    # Start worker threads before running the app
-    consumer_threads = start_workers(DEFAULT_WORKER_COUNT)
-    
-    # Start the producer thread automatically
-    start_producer()
-    
+        # Wait for all threads to finish
+        for thread in threads:
+            thread.join()
+
+        time.sleep(15)  # Create new threads every 60 seconds
+
+@app.route("/start_task", methods=["POST"])
+def start_task():
+    """API to start a new task."""
+    task_id = str(len(tasks) + 1)
+    thread = threading.Thread(target=task_executor, args=(task_id,))
+    thread.start()
+    threads.append(thread)
+
+    print(f"Started Task {task_id}.")
+    return jsonify({"message": f"Task {task_id} started.", "task_id": task_id})
+
+@app.route("/task_progress", methods=["GET"])
+def task_progress():
+    """API to get the progress of all tasks."""
+    return jsonify(tasks)
+
+@app.route("/stop_tasks", methods=["POST"])
+def stop_tasks():
+    """API to stop all running tasks."""
+    global running
+    running = False
+
+    # Wait for all threads to finish
+    for thread in threads:
+        thread.join()
+
+    print("All tasks stopped.")
+    return jsonify({"message": "All tasks stopped."})
+
+if __name__ == "__main__":
     try:
-        # Run the Flask app
-        app.run(host=FLASK_HOST, port=FLASK_PORT, debug=FLASK_DEBUG)
+        # Start the thread creator in a separate thread
+        creator_thread = threading.Thread(target=thread_creator)
+        creator_thread.start()
+
+        # Run the Flask server in the main thread
+        app.run(debug=False)
+    except KeyboardInterrupt:
+        print("Program interrupted by user.")
     finally:
-        # Run cleanup
-        cleanup()
-        print("Application terminated")
+        print("Program terminating...")
+        running = False
+        creator_thread.join(timeout=2)
+        for t in threads:
+            t.join(timeout=2)
+        logger.info("Exiting...")
+        sys.exit(0)
